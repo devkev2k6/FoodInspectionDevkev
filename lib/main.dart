@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:http/http.dart' as http;
 import 'package:shimmer/shimmer.dart';
 
 void main() {
@@ -39,21 +39,16 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   // ---------------------------------------------------------------------------
-  // API key — loaded from --dart-define at build/run time.
-  // Usage:  flutter run --dart-define=GEMINI_KEY=YOUR_KEY_HERE
-  // Get a FREE key at: https://aistudio.google.com/app/apikey
+  // Groq API key — FREE at console.groq.com (no payment required)
+  // Usage: flutter build web --dart-define=GROQ_KEY=YOUR_KEY_HERE
   // ---------------------------------------------------------------------------
   static const _apiKey = String.fromEnvironment(
-    'GEMINI_KEY',
-    defaultValue: '', // <-- paste your key here for dev only
+    'GROQ_KEY',
+    defaultValue: '', // paste your Groq key here for dev
   );
 
-  // ✅ FIX 1: Using gemini-1.5-flash — more generous free-tier quota
-  final _model = GenerativeModel(
-    model: 'gemini-1.5-flash',
-    apiKey: _apiKey,
-    generationConfig: GenerationConfig(temperature: 0.2, maxOutputTokens: 512),
-  );
+  static const _endpoint = 'https://api.groq.com/openai/v1/chat/completions';
+  static const _model = 'meta-llama/llama-4-scout-17b-preview';
 
   bool _isLoading = false;
   String _statusMessage = '';
@@ -71,6 +66,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     super.dispose();
   }
 
+  // ── Core logic ──────────────────────────────────────────────────────────────
+
   Future<void> _analyzeFoodQuality() async {
     final picker = ImagePicker();
     final XFile? photo = await picker.pickImage(
@@ -87,9 +84,10 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
     try {
       final imageBytes = await photo.readAsBytes();
+      final base64Image = base64Encode(imageBytes);
+      final mimeType = _getMimeType(photo.name);
 
-      // ✅ FIX 2: Retry with exponential backoff on quota errors
-      final result = await _analyzeWithRetry(imageBytes);
+      final result = await _analyzeWithRetry(base64Image, mimeType);
 
       final isPass = (result['pass'] as bool?) ?? false;
       final score = (result['score'] as int?) ?? 0;
@@ -122,8 +120,10 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
   }
 
-  /// Retries up to 3 times with exponential backoff on quota/rate-limit errors.
-  Future<Map<String, dynamic>> _analyzeWithRetry(Uint8List imageBytes) async {
+  Future<Map<String, dynamic>> _analyzeWithRetry(
+    String base64Image,
+    String mimeType,
+  ) async {
     const maxAttempts = 3;
     const prompt = '''
 You are a professional kitchen hygiene and food-quality inspector with 20 years of experience.
@@ -144,44 +144,92 @@ Be strict — safety first.
 
     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        final response = await _model.generateContent([
-          Content.multi([TextPart(prompt), DataPart('image/jpeg', imageBytes)]),
-        ]);
+        final response = await http.post(
+          Uri.parse(_endpoint),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $_apiKey',
+          },
+          body: jsonEncode({
+            'model': _model,
+            'max_tokens': 512,
+            'messages': [
+              {
+                'role': 'user',
+                'content': [
+                  {
+                    'type': 'image_url',
+                    'image_url': {'url': 'data:$mimeType;base64,$base64Image'},
+                  },
+                  {'type': 'text', 'text': prompt},
+                ],
+              },
+            ],
+          }),
+        );
 
-        final rawText = response.text ?? '{}';
-        final parsed = _parseGeminiJson(rawText);
-        if (parsed.isEmpty) throw Exception('Empty or invalid JSON response');
+        if (response.statusCode == 429) {
+          // Rate limited — retry with backoff
+          if (attempt < maxAttempts) {
+            final waitSeconds = 15 * attempt;
+            setState(
+              () => _statusMessage =
+                  'Rate limited — retrying in ${waitSeconds}s (attempt $attempt/$maxAttempts)…',
+            );
+            await Future.delayed(Duration(seconds: waitSeconds));
+            continue;
+          }
+          throw Exception(
+            'Rate limit exceeded. Please wait a minute and try again.',
+          );
+        }
+
+        if (response.statusCode != 200) {
+          final err = jsonDecode(response.body);
+          throw Exception(
+            err['error']?['message'] ?? 'API error ${response.statusCode}',
+          );
+        }
+
+        final body = jsonDecode(response.body);
+        final rawText = body['choices']?[0]?['message']?['content'] ?? '{}';
+        final parsed = _parseJson(rawText);
+        if (parsed.isEmpty) throw Exception('Invalid JSON response from AI');
         return parsed;
       } catch (e) {
-        final isQuotaError =
-            e.toString().contains('quota') ||
+        if (attempt == maxAttempts) rethrow;
+        final isRetryable =
             e.toString().contains('429') ||
-            e.toString().contains('RESOURCE_EXHAUSTED') ||
-            e.toString().contains('rate');
+            e.toString().contains('rate') ||
+            e.toString().contains('timeout');
+        if (!isRetryable) rethrow;
 
-        if (isQuotaError && attempt < maxAttempts) {
-          final waitSeconds = 15 * attempt; // 15s, then 30s
-          setState(
-            () => _statusMessage =
-                'Rate limited — retrying in ${waitSeconds}s (attempt $attempt/$maxAttempts)…',
-          );
-          await Future.delayed(Duration(seconds: waitSeconds));
-          continue;
-        }
-
-        if (isQuotaError) {
-          throw Exception(
-            'Gemini free quota exhausted. Wait 1 minute and try again.\n'
-            'Or get a fresh key at: aistudio.google.com/app/apikey',
-          );
-        }
-        rethrow;
+        final waitSeconds = 15 * attempt;
+        setState(
+          () => _statusMessage =
+              'Retrying in ${waitSeconds}s (attempt $attempt/$maxAttempts)…',
+        );
+        await Future.delayed(Duration(seconds: waitSeconds));
       }
     }
     throw Exception('All retry attempts failed.');
   }
 
-  Map<String, dynamic> _parseGeminiJson(String raw) {
+  String _getMimeType(String filename) {
+    final ext = filename.split('.').last.toLowerCase();
+    switch (ext) {
+      case 'png':
+        return 'image/png';
+      case 'gif':
+        return 'image/gif';
+      case 'webp':
+        return 'image/webp';
+      default:
+        return 'image/jpeg';
+    }
+  }
+
+  Map<String, dynamic> _parseJson(String raw) {
     try {
       final cleaned = raw
           .replaceAll(RegExp(r'```json\s*'), '')
@@ -204,6 +252,8 @@ Be strict — safety first.
       ),
     );
   }
+
+  // ── Build ───────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -299,6 +349,8 @@ Be strict — safety first.
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
     );
   }
+
+  // ── UI helpers ──────────────────────────────────────────────────────────────
 
   Widget _buildEmptyState() {
     return Padding(
@@ -399,7 +451,7 @@ Be strict — safety first.
       child: Column(
         children: [
           Container(
-            height: 180,
+            height: 200,
             width: double.infinity,
             decoration: BoxDecoration(
               color: Colors.white,
