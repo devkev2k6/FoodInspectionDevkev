@@ -48,7 +48,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   );
 
   static const _endpoint = 'https://api.groq.com/openai/v1/chat/completions';
-  static const _model = 'meta-llama/llama-4-scout-17b-preview';
+  static const _model = 'meta-llama/llama-4-scout-17b-16e-instruct';
 
   bool _isLoading = false;
   String _statusMessage = '';
