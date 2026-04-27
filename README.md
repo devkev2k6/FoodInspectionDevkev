@@ -65,12 +65,11 @@ Foodborne illnesses disproportionately affect low-income communities that cannot
 
 <!-- Add your screenshots here after UI update -->
 
+## Screenshots
+
 | Home Screen | Inspection Result | Scan History |
 |:-----------:|:-----------------:|:------------:|
-| <img width="1366" height="768" alt="image" src="https://github.com/user-attachments/assets/0887d241-5a87-446e-98b5-c0e331ec865f" />
- | <img width="1366" height="768" alt="image" src="https://github.com/user-attachments/assets/2b34e7b2-a3ab-4767-a676-44ddf909de80" />
- | <img width="1366" height="768" alt="image" src="https://github.com/user-attachments/assets/fe032488-378c-4bfd-a82f-96ce3d66856c" />
- |
+| <img src="https://github.com/user-attachments/assets/0887d241-5a87-446e-98b5-c0e331ec865f" width="100%" /> | <img src="https://github.com/user-attachments/assets/2b34e7b2-a3ab-4767-a676-44ddf909de80" width="100%" /> | <img src="https://github.com/user-attachments/assets/fe032488-378c-4bfd-a82f-96ce3d66856c" width="100%" /> |
 
 ---
 
