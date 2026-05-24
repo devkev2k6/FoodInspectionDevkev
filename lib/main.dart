@@ -38,10 +38,7 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
-  // ---------------------------------------------------------------------------
-  // Groq API key — FREE at console.groq.com (no payment required)
-  // Usage: flutter build web --dart-define=GROQ_KEY=YOUR_KEY_HERE
-  // ---------------------------------------------------------------------------
+
   static const _apiKey = String.fromEnvironment(
     'GROQ_KEY',
     defaultValue: '', // paste your Groq key here for dev
@@ -66,7 +63,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  // ── Core logic ──────────────────────────────────────────────────────────────
 
   Future<void> _analyzeFoodQuality() async {
     final picker = ImagePicker();
@@ -253,7 +249,7 @@ Be strict — safety first.
     );
   }
 
-  // ── Build ───────────────────────────────────────────────────────────────────
+//build
 
   @override
   Widget build(BuildContext context) {
@@ -350,7 +346,7 @@ Be strict — safety first.
     );
   }
 
-  // ── UI helpers ──────────────────────────────────────────────────────────────
+  //ui helpers
 
   Widget _buildEmptyState() {
     return Padding(
